@@ -40,33 +40,35 @@ fn random_filter(value: minijinja::Value) -> Result<minijinja::Value, minijinja:
     }
 }
 
+lazy_static::lazy_static! {
+    static ref TEMPLATE_TEXT: String = {
+        use std::io::Read;
+
+        let path = std::env::var("TEMPLATE_PATH").unwrap_or("template.md".into());
+        debug!("Reading template from file path: {:?}", path);
+
+        let mut text = String::new();
+        std::fs::File::open(path)
+            .expect("Unable to open template file")
+            .read_to_string(&mut text)
+            .expect("Unable to read template file");
+
+        text
+    };
+
+    static ref JINJA_ENV: minijinja::Environment<'static> = {
+        let mut env = minijinja::Environment::new();
+        minijinja_contrib::add_to_environment(&mut env);
+        env.add_template("template", &TEMPLATE_TEXT).unwrap();
+        env.add_filter("random", random_filter);
+        env
+    };
+}
+
 fn render_template(render_sections: &BTreeMap<String, RenderSection>, config: &Config, editor: &RoomMember) -> Option<String>
 {
-    let path = match std::env::var("TEMPLATE_PATH") {
-        Ok(val) => val,
-        Err(_) => return None,
-    };
+    let template = JINJA_ENV.get_template("template").unwrap();
 
-    debug!("Reading template from file path: {:?}", path);
-    let text = match std::fs::File::open(path) {
-        Ok(mut f) => {
-            use std::io::Read;
-            let mut t = String::new();
-            f.read_to_string(&mut t).expect("Unable to read file");
-            t
-        },
-        Err(err) => {
-            debug!("Could not open file: {:?}", err);
-            return None;
-        },
-    };
-
-    let mut env = minijinja::Environment::new();
-    minijinja_contrib::add_to_environment(&mut env);
-    env.add_template("template", &text).unwrap();
-    env.add_filter("random", random_filter);
-
-    let template = env.get_template("template").unwrap();
     let result = template.render(minijinja::context! {
         sections => render_sections,
         config => config,
