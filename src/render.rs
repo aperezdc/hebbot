@@ -3,6 +3,7 @@ use matrix_sdk::ruma::{EventId, OwnedMxcUri};
 use serde::{Deserialize, Serialize};
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::LazyLock;
 
 use crate::{utils, Config, News, Project, Section};
 
@@ -40,49 +41,38 @@ fn random_filter(value: minijinja::Value) -> Result<minijinja::Value, minijinja:
     }
 }
 
-lazy_static::lazy_static! {
-    static ref TEMPLATE_TEXT: String = {
+static RELOADER: LazyLock<minijinja_autoreload::AutoReloader> = LazyLock::new(|| {
+    minijinja_autoreload::AutoReloader::new(|notifier| {
         use std::io::Read;
 
         let path = std::env::var("TEMPLATE_PATH").unwrap_or("template.md".into());
         debug!("Reading template from file path: {:?}", path);
 
         let mut text = String::new();
-        std::fs::File::open(path)
-            .expect("Unable to open template file")
+        std::fs::File::open(path.clone())
+            .map_err(|err| {
+                minijinja::Error::new(
+                    minijinja::ErrorKind::TemplateNotFound,
+                    format!("Failed to open file '{}': {}", path, err),
+                )
+            })?
             .read_to_string(&mut text)
-            .expect("Unable to read template file");
+            .map_err(|err| {
+                minijinja::Error::new(
+                    minijinja::ErrorKind::TemplateNotFound,
+                    format!("Failed to read file '{}': {}", path, err),
+                )
+            })?;
 
-        text
-    };
-
-    static ref JINJA_ENV: minijinja::Environment<'static> = {
         let mut env = minijinja::Environment::new();
         minijinja_contrib::add_to_environment(&mut env);
-        env.add_template("template", &TEMPLATE_TEXT).unwrap();
+        env.add_template_owned("template", text)?;
         env.add_filter("random", random_filter);
-        env
-    };
-}
 
-fn render_template(
-    render_sections: &BTreeMap<String, RenderSection>,
-    config: &Config,
-    editor: &RoomMember,
-) -> Option<String> {
-    let template = JINJA_ENV.get_template("template").unwrap();
-
-    let result = template
-        .render(minijinja::context! {
-            sections => render_sections,
-            config => config,
-            editor => utils::get_member_display_name(editor),
-        })
-        .unwrap();
-
-    println!("{}", result);
-    Some(result)
-}
+        notifier.watch_path(path, false);
+        Ok(env)
+    })
+});
 
 pub fn render(news_list: Vec<News>, config: Config, editor: &RoomMember) -> RenderResult {
     let mut render_projects: BTreeMap<String, RenderProject> = BTreeMap::new();
@@ -260,7 +250,17 @@ pub fn render(news_list: Vec<News>, config: Config, editor: &RoomMember) -> Rend
     warnings.reverse();
     notes.reverse();
 
-    let rendered = render_template(&render_sections, &config, editor).unwrap();
+    let env = &*RELOADER
+        .acquire_env()
+        .expect("Could not obtain template environment");
+    let template = env.get_template("template").unwrap();
+    let rendered = template
+        .render(minijinja::context! {
+            sections => render_sections,
+            config => config,
+            editor => utils::get_member_display_name(editor),
+        })
+        .unwrap();
 
     RenderResult {
         rendered,
