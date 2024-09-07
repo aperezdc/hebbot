@@ -74,7 +74,11 @@ static RELOADER: LazyLock<minijinja_autoreload::AutoReloader> = LazyLock::new(||
     })
 });
 
-pub fn render(news_list: Vec<News>, config: Config, editor: &RoomMember) -> RenderResult {
+pub fn render(
+    news_list: Vec<News>,
+    config: Config,
+    editor: &RoomMember,
+) -> Result<RenderResult, minijinja::Error> {
     let mut render_projects: BTreeMap<String, RenderProject> = BTreeMap::new();
     let mut render_sections: BTreeMap<String, RenderSection> = BTreeMap::new();
 
@@ -250,25 +254,21 @@ pub fn render(news_list: Vec<News>, config: Config, editor: &RoomMember) -> Rend
     warnings.reverse();
     notes.reverse();
 
-    let env = &*RELOADER
-        .acquire_env()
-        .expect("Could not obtain template environment");
-    let template = env.get_template("template").unwrap();
-    let rendered = template
-        .render(minijinja::context! {
-            sections => render_sections,
-            config => config,
-            editor => utils::get_member_display_name(editor),
-        })
-        .unwrap();
+    let env = &*RELOADER.acquire_env()?;
+    let rendered = env.get_template("template")?.render(minijinja::context! {
+        sections => render_sections,
+        projects => project_names,
+        config => config,
+        editor => utils::get_member_display_name(editor),
+    })?;
 
-    RenderResult {
+    Ok(RenderResult {
         rendered,
         warnings,
         notes,
         images,
         videos,
-    }
+    })
 }
 
 fn message_link(config: &Config, event_id: &EventId) -> String {
