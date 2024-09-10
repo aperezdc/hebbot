@@ -33,14 +33,6 @@ pub struct RenderResult {
     pub videos: Vec<(String, OwnedMxcUri)>,
 }
 
-fn random_filter(value: minijinja::Value) -> Result<minijinja::Value, minijinja::Error> {
-    if let Some(len) = value.len() {
-        value.get_item_by_index(rand::random::<usize>() % len)
-    } else {
-        Ok(value)
-    }
-}
-
 static RELOADER: LazyLock<minijinja_autoreload::AutoReloader> = LazyLock::new(|| {
     minijinja_autoreload::AutoReloader::new(|notifier| {
         use std::io::Read;
@@ -67,7 +59,6 @@ static RELOADER: LazyLock<minijinja_autoreload::AutoReloader> = LazyLock::new(||
         let mut env = minijinja::Environment::new();
         minijinja_contrib::add_to_environment(&mut env);
         env.add_template_owned("template", text)?;
-        env.add_filter("random", random_filter);
 
         notifier.watch_path(path, false);
         Ok(env)

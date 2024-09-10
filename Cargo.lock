@@ -1892,6 +1892,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ffd46ee854be23604a20efd6c9655374fefbe4d44b949dc0f907305d92873a"
 dependencies = [
  "minijinja",
+ "rand",
  "serde",
  "time",
 ]
