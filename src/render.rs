@@ -33,6 +33,39 @@ pub struct RenderResult {
     pub videos: Vec<(String, OwnedMxcUri)>,
 }
 
+fn template_filter_timedelta(
+    timestamp: minijinja::value::ViaDeserialize<time::OffsetDateTime>,
+    options: minijinja::value::Kwargs,
+) -> Result<minijinja::Value, minijinja::Error> {
+    let mut duration = time::Duration::seconds(0);
+    if let Some(seconds) = options.get::<Option<f64>>("seconds")? {
+        duration = duration.saturating_add(time::Duration::seconds_f64(seconds));
+    }
+    if let Some(minutes) = options.get::<Option<i64>>("minutes")? {
+        duration = duration.saturating_add(time::Duration::minutes(minutes));
+    }
+    if let Some(hours) = options.get::<Option<i64>>("hours")? {
+        duration = duration.saturating_add(time::Duration::hours(hours));
+    }
+    if let Some(days) = options.get::<Option<i64>>("days")? {
+        duration = duration.saturating_add(time::Duration::days(days));
+    }
+    if let Some(weeks) = options.get::<Option<i64>>("weeks")? {
+        duration = duration.saturating_add(time::Duration::days(weeks * 7));
+    }
+    if let Some(months) = options.get::<Option<i64>>("months")? {
+        duration = duration.saturating_add(time::Duration::days(months * 30));
+    }
+    if let Some(years) = options.get::<Option<i64>>("years")? {
+        duration = duration.saturating_add(time::Duration::days(years * 365));
+    }
+    options.assert_all_used()?;
+
+    Ok(minijinja::Value::from_serialize(
+        timestamp.saturating_add(duration),
+    ))
+}
+
 static RELOADER: LazyLock<minijinja_autoreload::AutoReloader> = LazyLock::new(|| {
     minijinja_autoreload::AutoReloader::new(|notifier| {
         use std::io::Read;
@@ -58,6 +91,7 @@ static RELOADER: LazyLock<minijinja_autoreload::AutoReloader> = LazyLock::new(||
 
         let mut env = minijinja::Environment::new();
         minijinja_contrib::add_to_environment(&mut env);
+        env.add_filter("timedelta", template_filter_timedelta);
         env.add_template_owned("template", text)?;
 
         notifier.watch_path(path, false);
@@ -247,6 +281,7 @@ pub fn render(
 
     let env = &*RELOADER.acquire_env()?;
     let rendered = env.get_template("template")?.render(minijinja::context! {
+        timestamp => time::OffsetDateTime::now_utc(),
         sections => render_sections,
         projects => project_names,
         config => config,
